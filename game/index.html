@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kestrel Courier — a flight game</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0a0e14; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #eef1f5; }
+  #game { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+  #status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  #no-webgl { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #0a0e14; z-index: 40; font-size: 20px; }
+  #no-webgl[hidden] { display: none; }
+  /* Author display rules override the hidden attribute's built-in display:none,
+     so state it explicitly for every element the game hides and shows. */
+  [hidden] { display: none !important; }
+
+  /* ---- HUD: glass instruments over the canvas ---- */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; font-variant-numeric: tabular-nums; }
+  .hud-box { position: absolute; background: rgba(8, 12, 20, 0.62); border: 1px solid rgba(140, 180, 220, 0.25); border-radius: 10px; padding: 8px 12px; backdrop-filter: blur(2px); }
+  #hud-top-left { top: 12px; left: 12px; display: flex; gap: 18px; }
+  #hud-top-right { top: 12px; right: 12px; text-align: right; }
+  .hud-num { font-size: 26px; font-weight: 700; line-height: 1.1; color: #bfe3ff; }
+  .hud-label { font-size: 11px; letter-spacing: 0.12em; color: #8b93a3; text-transform: uppercase; }
+  #hud-bottom-left { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 14px; align-items: flex-end; }
+  #hud-bottom-right { right: 12px; bottom: 12px; text-align: right; }
+  .bar { width: 140px; height: 8px; background: rgba(255,255,255,0.15); border-radius: 4px; overflow: hidden; margin-top: 4px; }
+  .bar > div { height: 100%; background: #34d399; }
+  #hud-fuel { background: #f2c94c; }
+  #hud-engine.ok { color: #34d399; }
+  #hud-engine.bad { color: #ff5a4e; font-weight: 700; }
+  #att { width: 92px; height: 92px; border-radius: 50%; border: 2px solid rgba(140,180,220,0.4); overflow: hidden; position: relative; background: #1b2a44; flex: none; }
+  #att-horizon { position: absolute; left: -50%; top: 50%; width: 200%; height: 200%; transform-origin: 50% 0; }
+  #att-horizon .sky { position: absolute; left: 0; top: -50%; width: 100%; height: 50%; background: #3f7ec2; }
+  #att-horizon .ground { position: absolute; left: 0; top: 0; width: 100%; height: 50%; background: #7a5a34; }
+  #att-plane { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #ffd75e; font-size: 22px; font-weight: 700; }
+  #warn { position: absolute; top: 76px; left: 50%; transform: translateX(-50%); background: rgba(160, 20, 12, 0.88); border: 2px solid #ff5a4e; border-radius: 10px; padding: 10px 18px; font-size: 20px; font-weight: 700; text-align: center; }
+  #guide { position: absolute; left: 50%; bottom: 110px; transform: translateX(-50%); background: rgba(8, 12, 20, 0.6); border-radius: 8px; padding: 6px 14px; font-size: 15px; color: #ffd75e; }
+  #guide-dist { position: absolute; left: 50%; bottom: 78px; transform: translateX(-50%); background: rgba(8, 12, 20, 0.6); border-radius: 8px; padding: 4px 12px; font-size: 13px; color: #c8d0dc; }
+  #flash { position: absolute; left: 50%; top: 34%; transform: translateX(-50%); font-size: 28px; font-weight: 700; color: #ffd75e; text-shadow: 0 2px 8px rgba(0,0,0,0.8); }
+
+  /* ---- touch bar ---- */
+  #touch-bar { position: fixed; right: 12px; bottom: 120px; z-index: 6; display: flex; flex-direction: column; gap: 8px; }
+  #touch-bar button, .panel button { pointer-events: auto; cursor: pointer; background: rgba(20, 30, 46, 0.85); color: #eef1f5; border: 1px solid rgba(140,180,220,0.4); border-radius: 8px; padding: 9px 14px; font-size: 15px; }
+  #touch-bar button:active { background: #2c4a6b; }
+  #btn-pause { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 6; }
+
+  /* ---- panels ---- */
+  .panel { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; background: rgba(5, 8, 14, 0.55); }
+  .panel-card { background: rgba(13, 19, 30, 0.94); border: 1px solid rgba(140,180,220,0.3); border-radius: 16px; padding: 26px 32px; max-width: 640px; width: calc(100% - 40px); max-height: calc(100% - 40px); overflow: auto; }
+  .panel-card h1 { margin: 0 0 4px; font-size: 34px; letter-spacing: 0.02em; }
+  .panel-card h2 { margin: 18px 0 6px; font-size: 16px; color: #bfe3ff; text-transform: uppercase; letter-spacing: 0.1em; }
+  .panel-card p { margin: 6px 0; color: #c6cdd8; line-height: 1.5; }
+  .panel-card .sub { color: #8b93a3; font-size: 14px; }
+  .scenario { display: inline-block; margin: 4px 6px 4px 0; }
+  .scenario:hover { background: #2c4a6b; }
+  #title-best { color: #ffd75e; font-weight: 600; }
+  #over-board, #over-lines { margin: 8px 0; padding-left: 20px; line-height: 1.7; }
+  .row { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  .row button { font-size: 16px; padding: 10px 18px; }
+  .primary { background: #1d5c38 !important; border-color: #34d399 !important; }
+  input[type="range"] { width: 180px; vertical-align: middle; }
+  kbd { background: #222c3d; border: 1px solid #4a5a70; border-radius: 4px; padding: 1px 6px; font-family: inherit; }
+</style>
+</head>
+<body>
+<canvas id="game" aria-label="Kestrel Courier: fly the courier plane through the rings and land at Meridian Field"></canvas>
+<p id="status" role="status" aria-live="polite"></p>
+<div id="no-webgl" hidden>This game needs WebGL. Please open it in a desktop browser with WebGL enabled.</div>
+
+<div id="hud" hidden>
+  <div class="hud-box" id="hud-top-left">
+    <div><div class="hud-label">Altitude</div><div class="hud-num" id="hud-alt">—</div></div>
+    <div><div class="hud-label">Speed</div><div class="hud-num" id="hud-spd">—</div></div>
+    <div><div class="hud-label">Heading</div><div class="hud-num" id="hud-hdg">—</div></div>
+    <div><div class="hud-label">Position</div><div class="hud-num" id="hud-pos" style="font-size:16px;line-height:1.6">—</div></div>
+  </div>
+  <div class="hud-box" id="hud-top-right">
+    <div><div class="hud-label">Score</div><div class="hud-num" id="hud-score">0 pts</div></div>
+    <div><div class="hud-label">Time left</div><div class="hud-num" id="hud-time">4:00</div></div>
+  </div>
+  <div id="warn" hidden>ENGINE FAILURE — <span id="warn-count"></span></div>
+  <div id="flash" hidden></div>
+  <div id="guide"></div>
+  <div id="guide-dist"></div>
+  <div id="hud-bottom-left">
+    <div id="att" title="Attitude indicator"><div id="att-horizon"><div class="sky"></div><div class="ground"></div></div><div id="att-plane">—</div></div>
+    <div>
+      <div class="hud-label">Throttle</div><div class="bar"><div id="hud-throttle"></div></div>
+      <div class="hud-label" style="margin-top:6px"><span id="hud-fuel-text">Fuel 100%</span></div><div class="bar"><div id="hud-fuel"></div></div>
+    </div>
+  </div>
+  <div class="hud-box" id="hud-bottom-right">
+    <div id="hud-engine" class="ok">Engine OK</div>
+    <div id="hud-objective">—</div>
+    <div id="hud-distance">—</div>
+    <div id="hud-wind">—</div>
+    <div id="hud-vol">Vol 70</div>
+    <div style="font-size:11px;color:#8b93a3;margin-top:4px">V view · P pause · R restart engine</div>
+  </div>
+</div>
+<button id="btn-pause" type="button">II Pause</button>
+<div id="touch-bar" hidden>
+  <button id="btn-thr-up" type="button">Throttle +</button>
+  <button id="btn-thr-down" type="button">Throttle −</button>
+  <button id="btn-brake" type="button">Brake</button>
+  <button id="btn-view" type="button">View</button>
+  <button id="btn-restart" type="button">Restart engine</button>
+</div>
+
+<div class="panel" id="panel-title">
+  <div class="panel-card">
+    <h1>Kestrel Courier</h1>
+    <p class="sub">A courier flight over Caelum Valley. Fly the rings, mind the engine, and bring the Kestrel home to Meridian Field.</p>
+    <p id="title-best"></p>
+    <h2>Missions</h2>
+    <div id="scenario-missions"></div>
+    <h2>Landing challenges</h2>
+    <div id="scenario-landings"></div>
+    <h2>Test flights</h2>
+    <div id="scenario-tests"></div>
+    <h2>Sound</h2>
+    <p>Volume <input id="volume" type="range" min="0" max="100" value="70"> <span id="volume-value">70</span> — the game itself carries no audio; this sets the level for the future sound pack.</p>
+    <div class="row">
+      <button id="btn-help" type="button">How to fly</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="panel-help" hidden>
+  <div class="panel-card">
+    <h1>How to fly</h1>
+    <p><kbd>↑</kbd><kbd>↓</kbd> pitch · <kbd>←</kbd><kbd>→</kbd> bank and turn · <kbd>W</kbd>/<kbd>S</kbd> throttle · <kbd>Space</kbd> brake · <kbd>V</kbd> change view · <kbd>R</kbd> restart the engine · <kbd>P</kbd> pause. Drag on the screen to steer; the buttons on the right work by touch.</p>
+    <p>A sortie lasts 4 minutes and pays 20,000 points a minute while you hold 120 knots near 1,500 ft. Each gold ring is worth 5,000. At 3.5 minutes the runway lights come on 1.2 km out: land on the centreline, within 10 m, sinking at least 300 ft/min, to win.</p>
+    <p>The engine fails every 80–120 seconds. When the red warning shows, press <kbd>R</kbd> within 15 seconds or the engine stays dead and you glide. Watch the fuel — empty means gliding too.</p>
+    <p>Three views: cockpit, chase, and the tower. The leaderboard on this page keeps your best flights of this visit only.</p>
+    <div class="row"><button id="help-close" type="button" class="primary">Back</button></div>
+  </div>
+</div>
+
+<div class="panel" id="panel-paused" hidden>
+  <div class="panel-card">
+    <h1>Paused</h1>
+    <p>The Kestrel waits for you.</p>
+    <div class="row">
+      <button id="paused-resume" type="button" class="primary">Resume</button>
+      <button id="paused-quit" type="button">Quit to title</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="panel-over" hidden>
+  <div class="panel-card">
+    <h1 id="over-title">Flight over</h1>
+    <ul id="over-lines"></ul>
+    <h2>Leaderboard — this visit</h2>
+    <ol id="over-board"></ol>
+    <div class="row">
+      <button id="over-again" type="button" class="primary">Fly again</button>
+      <button id="over-menu" type="button">Choose another flight</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
